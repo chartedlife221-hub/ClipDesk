@@ -1,0 +1,15 @@
+# ClipDesk — Python 3.10+. FFmpeg/ffprobe must be installed separately (see README).
+fastapi>=0.110
+starlette>=0.37
+uvicorn>=0.29
+python-multipart>=0.0.9
+numpy>=1.26
+requests>=2.31
+# URL import (YouTube / Twitch replays)
+yt-dlp>=2024.10.22
+# local speech-to-text with word timestamps (CPU, int8)
+faster-whisper>=1.0.3
+# speaker auto-centre (face detection); optional
+opencv-python-headless>=4.9
+# tests
+pytest>=8
