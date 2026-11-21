@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS sources (
   chat_status TEXT NOT NULL DEFAULT 'none',         -- none | ready
   content_kind TEXT NOT NULL DEFAULT 'auto',        -- auto | gaming | speech
   time_offset REAL NOT NULL DEFAULT 0,              -- seconds into the original stream (section imports)
+  layout_memory TEXT NOT NULL DEFAULT '{}',         -- last framing used on this source, reused for new clips
   created REAL NOT NULL, updated REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS requests (
@@ -86,7 +87,7 @@ CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS ix_cand_req ON candidates(request_id);
 """
 
-JSON_COLS = {"hashtags", "signals", "captions", "layout", "payload", "result", "before", "after"}
+JSON_COLS = {"hashtags", "signals", "captions", "layout", "payload", "result", "before", "after", "layout_memory"}
 
 
 def new_id(prefix: str) -> str:
@@ -105,6 +106,13 @@ class DB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after v0.1 to databases created by older builds."""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(sources)").fetchall()}
+        if "layout_memory" not in cols:
+            self.conn.execute("ALTER TABLE sources ADD COLUMN layout_memory TEXT NOT NULL DEFAULT '{}'")
 
     # ---- helpers -------------------------------------------------------
     @staticmethod

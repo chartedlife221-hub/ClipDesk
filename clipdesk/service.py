@@ -461,7 +461,7 @@ class App:
                     "reason": c.reason, "hashtags": c.hashtags, "signals": c.signals, "origin": f"discovered:{mode}",
                     "created": now()})
                 self._create_clip(sid, c.start, c.end, title=c.title, hashtags=c.hashtags,
-                                  candidate_id=cid, layout=default_layout(layout_mode), transcript=tr)
+                                  candidate_id=cid, layout=self._layout_for(sid, layout_mode), transcript=tr)
         self.db.update("requests", rid, {"status": "done", "note": res.note, "provider": provider, "mode": mode})
         return {"message": res.note, "candidates": len(cands)}
 
@@ -485,7 +485,8 @@ class App:
                             r.get("hashtags", []), r.get("captions", []), r.get("layout", {}), now()])
         return cur.lastrowid
 
-    def create_manual_clip(self, sid: str, start: float, end: float, layout_mode: str | None = None) -> dict:
+    def create_manual_clip(self, sid: str, start: float, end: float, layout_mode: str | None = None,
+                           snap: bool = False) -> dict:
         s = self.source(sid)
         if s["status"] != "ready":
             raise UserError("Source is not ready yet.")
@@ -496,6 +497,9 @@ class App:
         err = detect.manual_bounds_check(start, end, float(s["duration"]))
         if err:
             raise UserError(err)
+        note = ""
+        if snap:
+            start, end, note = self.snap_edges(sid, start, end, float(s["duration"]))
         mode = layout_mode or ("gameplay" if self.resolve_mode(self.db.one("SELECT * FROM sources WHERE id=?", [sid]),
                                                                   "auto", self.transcript(sid)) == "gaming"
                                else self.settings.default_layout)
@@ -506,8 +510,10 @@ class App:
             if sents:
                 title = detect._title_from(max(sents, key=lambda x: len(x["text"]))["text"])
         kid = self._create_clip(sid, start, end, title=title or f"Clip at {detect.fmt_tc(start)}",
-                                hashtags=["#shorts", "#clips"], layout=default_layout(mode), transcript=tr)
-        return self.clip(kid)
+                                hashtags=["#shorts", "#clips"], layout=self._layout_for(sid, mode), transcript=tr)
+        k = self.clip(kid)
+        k["snap_note"] = note
+        return k
 
     def clip(self, kid: str) -> dict:
         k = self.db.one("""SELECT k.*, s.title AS source_title, s.duration AS source_duration, s.time_offset,
@@ -539,7 +545,9 @@ class App:
             a.append(check_id(creator_id))
         rows = self.db.all(f"""SELECT k.id, k.source_id, k.status, k.current_rev, k.approved_rev, k.updated,
                  r.start, r.end, r.title, r.hashtags, s.title AS source_title, s.time_offset, c.name AS creator_name,
-                 cd.score, cd.strength, cd.reason, cd.rank, cd.signals, cd.origin, q.text AS request_text
+                 cd.score, cd.strength, cd.reason, cd.rank, cd.signals, cd.origin, q.text AS request_text,
+                 (SELECT COUNT(*) FROM renders rr WHERE rr.clip_id=k.id AND rr.kind='final' AND rr.rev=k.approved_rev
+                  AND rr.status='done') > 0 AS exported
                  FROM clips k JOIN revisions r ON r.id=k.current_rev JOIN sources s ON s.id=k.source_id
                  LEFT JOIN creators c ON c.id=s.creator_id LEFT JOIN candidates cd ON cd.id=k.candidate_id
                  LEFT JOIN requests q ON q.id=cd.request_id
@@ -552,6 +560,7 @@ class App:
         cur = k["rev"]
         new = {key: cur[key] for key in ("start", "end", "title", "hashtags", "captions", "layout")}
         dur = float(k["source_duration"])
+        snap_note = ""
         if "start" in data or "end" in data:
             try:
                 s = float(data.get("start", cur["start"]))
@@ -561,6 +570,10 @@ class App:
             err = detect.manual_bounds_check(s, e, dur)
             if err:
                 raise UserError(err)
+            if data.get("snap"):
+                which = {w for w, key in (("s", "start"), ("e", "end"))
+                         if key in data and abs(float(data[key]) - float(cur[key])) > 1e-3}
+                s, e, snap_note = self.snap_edges(k["source_id"], s, e, dur, which)
             new["start"], new["end"] = round(s, 3), round(e, 3)
         if "title" in data:
             new["title"] = str(data["title"])[:120]
@@ -587,12 +600,127 @@ class App:
             if data["layout"].get("mode") and data["layout"]["mode"] != (cur["layout"] or {}).get("mode"):
                 lay = {**default_layout(data["layout"]["mode"]), **data["layout"]}
             new["layout"] = lay
+            self._remember_layout(k["source_id"], lay)
         if new == {key: cur[key] for key in new}:
+            k["snap_note"] = snap_note
             return k
         rev = self._insert_rev(kid, cur["id"], new)
         self.db.update("clips", kid, {"current_rev": rev, "updated": now()})
         self._log_action(kid, "edit", {"rev": cur["id"]}, {"rev": rev})
-        return self.clip(kid)
+        out = self.clip(kid)
+        out["snap_note"] = snap_note
+        return out
+
+    # ---- framing memory ---------------------------------------------------
+    REMEMBER = {"speaker": ("cx", "cy", "zoom", "caption_y"), "gameplay": ("face", "action", "split", "caption_y"),
+                "fit": ("caption_y",)}
+
+    def _layout_for(self, sid: str, mode: str) -> dict:
+        """Default layout for a new clip, with the framing last used on this source (fixes off-centre speakers)."""
+        lay = default_layout(mode)
+        r = self.db.one("SELECT layout_memory FROM sources WHERE id=?", [sid])
+        mem = (r or {}).get("layout_memory") or {}
+        lay.update({k: v for k, v in (mem.get(mode) or {}).items() if k in self.REMEMBER.get(mode, ())})
+        return lay
+
+    def _remember_layout(self, sid: str, lay: dict) -> None:
+        mode = lay.get("mode")
+        if mode not in self.REMEMBER:
+            return
+        r = self.db.one("SELECT layout_memory FROM sources WHERE id=?", [sid])
+        mem = (r or {}).get("layout_memory") or {}
+        mem[mode] = {k: lay[k] for k in self.REMEMBER[mode] if k in lay}
+        self.db.update("sources", sid, {"layout_memory": mem})
+
+    # ---- snapping manual edges to pauses -----------------------------------
+    def _energy(self, sid: str) -> np.ndarray | None:
+        """20 ms loudness envelope (dBFS) used to find pauses when there is no transcript."""
+        p = self.src_dir(sid) / "energy20ms.npy"
+        if p.exists():
+            return np.load(p)
+        wav = self.src_dir(sid) / "audio16k.wav"
+        if not wav.exists():
+            src = self.db.one("SELECT media_path, has_audio FROM sources WHERE id=?", [sid])
+            if not src or not src["has_audio"]:
+                return None
+            media.extract_wav(Path(src["media_path"]), wav)
+        samples, sr = media.read_wav_mono16(wav)
+        env = media.rms_windows(samples, sr, 0.02)
+        np.save(p, env)
+        return env
+
+    def snap_edges(self, sid: str, s: float, e: float, dur: float,
+                   which: set[str] | None = None) -> tuple[float, float, str]:
+        """Move start/end out of words: to the word edge (transcript) or the quietest 20 ms nearby (audio).
+
+        Never moves an edge more than 1.2 s, and keeps the original if snapping would break the limits.
+        """
+        which = {"s", "e"} if which is None else which
+        tr = self.transcript(sid)
+        s0, e0, how = s, e, ""
+        words = (tr or {}).get("words") or []
+        if words:
+            if "s" in which:
+                w = next((w for w in words if w["s"] - 0.05 <= s < w["e"]), None)
+                if w and abs(s - w["s"]) <= 1.2:
+                    i = words.index(w)
+                    prev_end = words[i - 1]["e"] if i else 0.0
+                    s = max(prev_end + 0.02, w["s"] - 0.12)
+            if "e" in which:
+                w = next((w for w in words if w["s"] < e <= w["e"] + 0.05), None)
+                if w and abs(w["e"] - e) <= 1.2:
+                    i = words.index(w)
+                    nxt = words[i + 1]["s"] if i + 1 < len(words) else dur
+                    e = min(nxt - 0.02, w["e"] + 0.15)
+            how = "word edges"
+        else:
+            env = self._energy(sid)
+            if env is not None and env.size:
+                def quiet(t):
+                    i0, i1 = max(0, int((t - 0.5) / 0.02)), min(env.size, int((t + 0.5) / 0.02) + 1)
+                    if i1 <= i0:
+                        return t
+                    seg = env[i0:i1]
+                    if seg.max() - seg.min() < 6:   # no real pause nearby: leave it
+                        return t
+                    return (i0 + int(np.argmin(seg))) * 0.02 + 0.01
+                if "s" in which:
+                    s = quiet(s)
+                if "e" in which:
+                    e = quiet(e)
+                how = "audio pauses"
+        s, e = max(0.0, round(s, 3)), min(dur, round(e, 3))
+        if detect.manual_bounds_check(s, e, dur):
+            return s0, e0, ""
+        moved = [f"{lbl} {abs(b - a):.2f}s" for lbl, a, b in (("start", s0, s), ("end", e0, e)) if abs(b - a) >= 0.01]
+        return s, e, (f"Snapped to {how}: " + ", ".join(moved)) if moved else ""
+
+    # ---- filmstrip thumbnails ------------------------------------------------
+    def strip(self, sid: str, s: float, e: float, n: int = 10, h: int = 64) -> Path:
+        """One JPEG of n frames side by side between s and e (cached) for the trim timeline."""
+        src = self.db.one("SELECT play_path, duration, width, height FROM sources WHERE id=?", [check_id(sid)])
+        if not src or not src["play_path"]:
+            raise UserError("Media not ready.")
+        dur = float(src["duration"])
+        s, e = max(0.0, float(s)), min(dur, float(e))
+        if e - s < 0.5:
+            raise UserError("Range too short.")
+        n, h = max(4, min(16, int(n))), max(32, min(120, int(h)))
+        d = self.src_dir(sid) / "strips"
+        d.mkdir(exist_ok=True)
+        out = d / f"{s:.1f}_{e:.1f}_{n}_{h}.jpg"
+        if out.exists():
+            return out
+        args = []
+        for i in range(n):
+            t = min(dur - 0.05, s + (i + 0.5) * (e - s) / n)
+            args += ["-ss", f"{t:.2f}", "-i", src["play_path"]]
+        chains = ";".join(f"[{i}:v]scale=-2:{h},setsar=1,trim=end_frame=1[f{i}]" for i in range(n))
+        graph = chains + ";" + "".join(f"[f{i}]" for i in range(n)) + f"hstack=inputs={n}[v]"
+        tmp = out.with_suffix(".part.jpg")
+        media.run_ffmpeg([*args, "-filter_complex", graph, "-map", "[v]", "-frames:v", "1", "-q:v", "5", str(tmp)])
+        tmp.replace(out)
+        return out
 
     def _refresh_captions(self, sid, caps, s, e):
         """Keep (possibly edited) lines that still overlap; fill newly uncovered time from the transcript."""

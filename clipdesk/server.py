@@ -154,6 +154,15 @@ def create_app(svc: App | None = None, start_jobs: bool = True):
     def source_signals(req, body):
         return svc.signals(p(req, "sid"))
 
+    def source_strip(req, body):
+        q = req.query_params
+        try:
+            path = svc.strip(p(req, "sid"), float(q.get("s", 0)), float(q.get("e", 0)),
+                             int(q.get("n", 10)), int(q.get("h", 64)))
+        except ValueError as e:
+            raise UserError(str(e)) from e
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
     def source_find(req, body):
         return svc.find(p(req, "sid"), body.get("text", ""), body.get("mode", "auto"))
 
@@ -164,7 +173,7 @@ def create_app(svc: App | None = None, start_jobs: bool = True):
     def clips(req, body):
         if req.method == "POST":
             return svc.create_manual_clip(check_id(body.get("source_id", "")), body.get("start"), body.get("end"),
-                                          body.get("layout"))
+                                          body.get("layout"), bool(body.get("snap")))
         q = req.query_params
         return svc.clips(q.get("source") or None, q.get("status") or None, q.get("creator") or None)
 
@@ -250,6 +259,7 @@ def create_app(svc: App | None = None, start_jobs: bool = True):
         Route("/api/sources/{sid}/transcript", H(source_transcript)),
         Route("/api/sources/{sid}/signals", H(source_signals)),
         Route("/api/sources/{sid}/find", H(source_find), methods=["POST"]),
+        Route("/api/sources/{sid}/strip.jpg", H(source_strip)),
         Route("/api/requests/{rid}", H(request_one)),
         Route("/api/clips", H(clips), methods=["GET", "POST"]),
         Route("/api/clips/{kid}", H(clip_one)),

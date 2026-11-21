@@ -1,4 +1,4 @@
-# ClipDesk: owner test build (v0.1.0, November 2026)
+# ClipDesk: owner test build (v0.2.0, November 2026)
 
 ClipDesk is a local clipping workspace. You import a stream replay or a talk, find a moment by describing it (or jump to a timestamp you already know), frame it 9:16, edit captions, approve it, and export a 1080×1920 MP4 or a ZIP of every approved clip.
 
@@ -21,6 +21,21 @@ Notes:
 - The first transcription downloads the Whisper model inside the codespace.
 - YouTube sometimes blocks downloads from cloud servers ("Sign in to confirm you're not a bot"). ClipDesk shows that as *Inaccessible*. If it happens, upload the file instead, or run ClipDesk on your own computer.
 - Rendering is slower on the default 2-core codespace; pick a 4-core machine type for faster exports.
+
+## What's new in v0.2
+
+| Before (v0.1) | Now (v0.2) |
+|---|---|
+| Dark screen with one yellow accent, text-glyph buttons | New design: colour carries meaning (teal = start, coral = end, lilac = main action, green/rose = approve/reject), always paired with an icon or words; one SVG icon set |
+| Plain grey trim bar | **Filmstrip trim**: thumbnails of the footage under big start/end timecodes, 44 px drag handles that work with a finger |
+| Hand-trimmed edges could cut words | **Snap to pauses** (on by default, toggle under the trim bar): manual edges move to the nearest word edge, or the quietest moment if there's no transcript, never more than 1.2 s. The note under the bar says how far it moved |
+| Off-centre speakers needed fixing on every clip | **Framing memory**: the crop you set is reused for every new clip from that recording |
+| Desktop-only layout | **Phone layout**: bottom navigation, Find/Edit tabs, review bar docked at the bottom, 44 px touch targets, 16 px text |
+| Approve/reject with no way back except a key | Every approve/reject toast has an **Undo** button |
+| Jobs bar covered the page | Background work sits in a small **activity button**; tap it for progress, cancel and retry |
+| — | Progress steps on each recording (Import, Transcript, Make clips, Approve, Export), loading states on every button, clearer error and empty-state messages, reduced-motion support |
+
+Screenshots: `docs/screenshots/`.
 
 ## 1. First run on your own computer
 
@@ -151,7 +166,7 @@ All under `clipdesk-data/` next to `run.py`. Set `CLIPDESK_DATA=/path` to move i
 
 ```bash
 pip install pytest requests
-python -m pytest -q          # 29 tests: units + full service flow + live HTTP server (needs ffmpeg)
+python -m pytest -q          # 31 tests: units + full service flow + live HTTP server (needs ffmpeg)
 python samples/make_samples.py   # regenerates the synthetic samples used in TEST_REPORT.md
 ```
 

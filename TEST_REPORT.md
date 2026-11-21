@@ -99,3 +99,26 @@ Appendix targets (≤15 min per 1-hour VOD on GPU, ≥60 % top-20 approval, <$0.
 4. Upload a real interview, let Whisper transcribe (first run downloads the model), and run the speech request.
 5. Check face auto-centre.
 6. Approve a handful of clips and tell me the approval rate and what you changed. That feedback sets the next release.
+
+
+---
+
+# v0.2 addendum (2026-11-21)
+
+Same workspace, Chrome via Playwright at 1440×900 (desktop) and 375×812 with touch (phone). The database from v0.1 was reused, so the migration ran on real data.
+
+| # | Check | Result | Observed |
+|---|---|---|---|
+| 27 | v0.1 database opens in v0.2 | **PASS** | `layout_memory` column added; all 3 approved clips and their exports kept |
+| 28 | Snap to pauses (Bug 2 from v0.1) | **PASS** | manual clip typed as 1:24.2–1:36.9 became 1:23.5–1:37.6 ("Snapped to word edges: start 0.70s, end 0.70s"); dragging the end handle snapped it 0.37 s; snap off keeps exact times (unit test) |
+| 29 | Framing memory (Bug 1 workaround) | **PASS** | set Left-right to 0.655 on one clip; the next clip made on that recording opened at 0.655 |
+| 30 | Filmstrip thumbnails | **PASS** | 10 frames per strip, about 3 s to make the first time, then cached |
+| 31 | Approve, then Undo from the toast | **PASS** | desktop and phone; status returns to what it was |
+| 32 | Export from the new editor | **PASS** | MP4 downloaded, clip approved |
+| 33 | Phone layout | **PASS after fix** | bottom navigation first appeared at the top (the header's blur effect captured it) and the Review page's action bar collided with the navigation; both fixed and re-checked |
+| 34 | Search results after a search that found nothing | **PASS after fix** | the latest search with results now stays open |
+| 35 | Touch targets | **PASS** | trim handles 44×84 px; buttons 44 px tall on touch screens |
+| 36 | Console errors across all views, desktop and phone | **PASS** | none |
+| 37 | Automated tests | **PASS** | 31 passed (2 new: snapping/framing memory/filmstrip, v0.1 database migration) |
+
+Still pending, as in v0.1: your YouTube link, live Whisper transcription, face auto-centre, real AI ranking, Windows/macOS.

@@ -2,46 +2,83 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1A1F2B">
 <title>ClipDesk</title>
+<link rel="preload" href="/static/fonts/DMSans.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="stylesheet" href="/static/app.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect x=%223%22 y=%221%22 width=%224%22 height=%2214%22 fill=%22%23ffcc33%22/%3E%3Crect x=%229%22 y=%221%22 width=%224%22 height=%2214%22 fill=%22%23ffcc33%22/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%231A1F2B%22/%3E%3Crect x=%229%22 y=%225%22 width=%2214%22 height=%2222%22 rx=%223%22 fill=%22none%22 stroke=%22%23B8A4FF%22 stroke-width=%222.5%22/%3E%3Cpath d=%22M9 11h14M9 21h14%22 stroke=%22%233CCFB6%22 stroke-width=%222.5%22/%3E%3C/svg%3E">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 4h4v16H7zM13 4h4v16h-4z"/></symbol>
+    <symbol id="i-replay" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+    <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5M12 3v12"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M3 12h18M3 16.5h4M17 7.5h4M17 16.5h4"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></symbol>
+    <symbol id="i-crop" viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/></symbol>
+    <symbol id="i-gamepad" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="4"/><path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M11 6h10M11 12h10M11 18h10"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M10 8l4 2-4 2z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M6 3v8a6 6 0 0 0 12 0V3"/><path d="M6 7h4M14 7h4M10 3v8a2 2 0 0 0 4 0V3"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  </defs>
+</svg>
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar">
-  <a class="brand" href="#/"><span class="logo" aria-hidden="true">▮▮</span> ClipDesk</a>
-  <nav aria-label="Primary">
-    <a href="#/" data-nav="home">Sources</a>
-    <a href="#/queue" data-nav="queue">Review queue <span id="pendingCount" class="count"></span></a>
-    <a href="#/settings" data-nav="settings">Setup</a>
+  <a class="brand" href="#/" aria-label="ClipDesk home"><span class="mark" aria-hidden="true"></span>ClipDesk</a>
+  <nav class="mainnav" aria-label="Primary">
+    <a href="#/" data-nav="home"><svg class="ic" aria-hidden="true"><use href="#i-library"/></svg><span>Sources</span></a>
+    <a href="#/queue" data-nav="queue"><svg class="ic" aria-hidden="true"><use href="#i-queue"/></svg><span>Review</span><b id="pendingCount" class="count"></b></a>
+    <a href="#/settings" data-nav="settings"><svg class="ic" aria-hidden="true"><use href="#i-sliders"/></svg><span>Setup</span></a>
   </nav>
-  <button class="ghost" id="helpBtn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+  <button class="iconbtn" id="helpBtn" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-keyboard"/></svg></button>
 </header>
 <div id="banner" class="banner" hidden></div>
 <main id="main" tabindex="-1"></main>
-<section id="jobsBar" class="jobsbar" aria-live="polite" aria-label="Background jobs"></section>
+<aside id="tray" class="tray" aria-label="Background work"></aside>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<dialog id="helpDlg">
-  <h2>Keyboard shortcuts</h2>
-  <p class="muted">Shortcuts are off while you're typing in a field. Press Esc to leave a field.</p>
+<dialog id="helpDlg" aria-labelledby="helpTitle">
+  <h2 id="helpTitle">Keyboard shortcuts</h2>
+  <p class="muted">They pause while you type in a field. Press Esc to leave the field.</p>
   <table class="keys">
-    <tr><td><kbd>Space</kbd></td><td>Play / pause source</td></tr>
-    <tr><td><kbd>P</kbd></td><td>Replay just the selection</td></tr>
-    <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set start / end at the playhead</td></tr>
-    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Seek 1 s (Shift: 5 s)</td></tr>
-    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Nudge start / end −/+0.2 s (Shift: end)</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>Play or pause the source</td></tr>
+    <tr><td><kbd>P</kbd></td><td>Replay the selection</td></tr>
+    <tr><td><kbd>I</kbd> <kbd>O</kbd></td><td>Set start or end at the playhead</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Seek 1 second (Shift for 5)</td></tr>
+    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Nudge the start 0.2 seconds</td></tr>
+    <tr><td><kbd>{</kbd> <kbd>}</kbd></td><td>Nudge the end 0.2 seconds</td></tr>
     <tr><td><kbd>G</kbd></td><td>Go to a timestamp</td></tr>
     <tr><td><kbd>/</kbd></td><td>Describe a moment to find</td></tr>
-    <tr><td><kbd>J</kbd> / <kbd>K</kbd></td><td>Next / previous clip</td></tr>
-    <tr><td><kbd>A</kbd></td><td>Approve clip</td></tr>
-    <tr><td><kbd>R</kbd></td><td>Reject clip</td></tr>
-    <tr><td><kbd>U</kbd> or <kbd>Ctrl/⌘ Z</kbd></td><td>Undo last change on this clip</td></tr>
-    <tr><td><kbd>V</kbd></td><td>Render preview with the export pipeline</td></tr>
-    <tr><td><kbd>E</kbd></td><td>Export MP4 (approves first if needed)</td></tr>
+    <tr><td><kbd>J</kbd> <kbd>K</kbd></td><td>Next or previous clip</td></tr>
+    <tr><td><kbd>A</kbd> <kbd>R</kbd></td><td>Approve or reject</td></tr>
+    <tr><td><kbd>U</kbd> or <kbd>Ctrl</kbd> <kbd>Z</kbd></td><td>Undo the last change</td></tr>
+    <tr><td><kbd>V</kbd></td><td>Render a preview file</td></tr>
+    <tr><td><kbd>E</kbd></td><td>Export the MP4</td></tr>
   </table>
-  <form method="dialog"><button class="primary">Close</button></form>
+  <form method="dialog"><button class="btn primary">Close</button></form>
 </dialog>
 <script src="/static/app.js"></script>
 </body>

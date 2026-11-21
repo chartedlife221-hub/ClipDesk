@@ -153,3 +153,47 @@ def test_http_api(server, tiny_video):
     assert requests.get(server + "/api/sources/../../etc/passwd").status_code in (400, 404)
     assert requests.get(server + "/api/exports/..%2Fclipdesk.sqlite").status_code == 404
     assert requests.get(server + "/").status_code == 200
+
+
+def test_v02_snap_memory_strip_migration(data_dir, tiny_video):
+    app = App()
+    app.jobs.start()
+    try:
+        with open(tiny_video, "rb") as f:
+            s = app.add_upload_source("tiny.mp4", f, None, "speech")
+        s = wait_source(app, s["id"])
+        sid = s["id"]
+        # transcript with a word spanning 3.8–4.4 s and one spanning 8.6–9.3 s
+        words = [{"s": 1.0 + i * 0.6, "e": 1.4 + i * 0.6, "w": f"w{i}"} for i in range(14)]
+        app._save_transcript(sid, {"engine": "test", "language": "en", "word_timing": "measured",
+                                   "words": words, "segments": []})
+        k = app.create_manual_clip(sid, 4.0, 9.0, snap=True)      # 4.0 is inside w5 (4.0–4.4), 9.0 inside w13
+        assert k["rev"]["start"] <= 4.0 and k["rev"]["end"] >= 9.0 and "Snapped to word edges" in k["snap_note"]
+        k2 = app.create_manual_clip(sid, 4.0, 9.0)                 # snap off: exact
+        assert (k2["rev"]["start"], k2["rev"]["end"]) == (4.0, 9.0)
+        r = app.revise(k2["id"], {"end": 8.3, "snap": True})     # only the moved edge snaps
+        assert r["rev"]["start"] == 4.0 and r["rev"]["end"] != 8.3
+        # framing memory: a crop set on one clip becomes the default for the next clip of that source
+        app.revise(k["id"], {"layout": {"mode": "speaker", "cx": 0.66}})
+        k3 = app.create_manual_clip(sid, 1.0, 5.0, layout_mode="speaker")
+        assert k3["rev"]["layout"]["cx"] == 0.66
+        p = app.strip(sid, 0, 12, n=6, h=40)
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(p)],
+                             capture_output=True, text=True).stdout.strip()
+        assert out.endswith(",40") and int(out.split(",")[0]) > 6 * 40
+    finally:
+        app.jobs.stop()
+
+
+def test_v01_database_migrates(data_dir):
+    import sqlite3
+    from clipdesk.config import data_root
+    db = data_root() / "clipdesk.sqlite"
+    con = sqlite3.connect(db)
+    con.executescript("CREATE TABLE sources (id TEXT PRIMARY KEY, creator_id TEXT, origin TEXT NOT NULL, url TEXT, "
+                      "title TEXT NOT NULL DEFAULT '', duration REAL, status TEXT NOT NULL, created REAL NOT NULL, "
+                      "updated REAL NOT NULL);")
+    con.close()
+    DB(db)
+    cols = [r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(sources)")]
+    assert "layout_memory" in cols
