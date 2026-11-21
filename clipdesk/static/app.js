@@ -442,7 +442,7 @@ function renderEditor() {
       <span id="saveState" class="small faint" aria-live="polite"></span>
     </div>
     <div class="tabs" role="tablist" aria-label="Clip settings">
-      ${[["frame", "crop", "Framing"], ["caps", "type", "Captions"], ["info", "sliders", "Title and tags"]].map(([id, ic, lb]) => `<button role="tab" data-it="${id}" aria-selected="${ws.itab === id}">${icon(ic)}${lb}</button>`).join("")}
+      ${[["frame", "crop", "Framing"], ["caps", "type", "Captions"], ["info", "sliders", "Details"]].map(([id, ic, lb]) => `<button role="tab" data-it="${id}" aria-selected="${ws.itab === id}">${icon(ic)}${lb}</button>`).join("")}
     </div>
     <div data-ip="frame" ${ws.itab === "frame" ? "" : "hidden"}>
       <div class="seg" role="radiogroup" aria-label="Framing" style="display:flex;margin-bottom:12px">
