@@ -168,3 +168,33 @@ def test_rerank_fallbacks(monkeypatch):
     out, label = score.rerank(list(cands), "x", _tr(), s, call=fake)
     assert label.startswith("Anthropic") and out[0].title == "Coffee cart went under"
     assert "[model]" not in out[0].reason  # ungrounded model reason is rejected
+
+
+# ------------------------------------------------------------------ v0.3 caption styles
+def test_line_words_uses_transcript_when_text_matches_else_spreads():
+    line = {"s": 1.0, "e": 3.0, "text": "my first company"}
+    tr = [{"s": 1.1, "e": 1.4, "w": "My"}, {"s": 1.5, "e": 2.0, "w": "first"}, {"s": 2.1, "e": 2.9, "w": "company,"}]
+    ws = captions.line_words(line, tr)
+    assert [w["s"] for w in ws] == [1.0, 1.5, 2.1] and ws[-1]["e"] == 3.0
+    edited = captions.line_words({**line, "text": "my FIRST little company"}, tr)  # edited text: spread
+    assert len(edited) == 4 and edited[0]["s"] == 1.0 and edited[-1]["e"] == 3.0
+
+
+def test_chunks_tile_the_line_and_presets_differ():
+    line = {"s": 0.0, "e": 4.0, "text": "one two three four five six seven"}
+    ws = captions.line_words(line, None)
+    ch = captions.chunk_words(line, ws, 3)
+    assert [len(c["words"]) for c in ch] == [3, 3, 1] and ch[0]["s"] == 0.0 and ch[-1]["e"] == 4.0
+    assert all(abs(a["e"] - b["s"]) < 1e-6 for a, b in zip(ch, ch[1:]))  # no gaps / overlaps
+    outs = {}
+    for p in captions.PRESETS:
+        st = captions.resolve_style({"style": {"preset": p, "color": "#3CF2A3"}}, 76)
+        outs[p] = captions.build_styled_ass([line], None, st)
+    assert "\\fscx112" in outs["pop"] and "&H00A3F23C" in outs["pop"]           # highlight colour (BGR)
+    assert "\\1a&H70&" in outs["karaoke"]                                        # upcoming words dimmed
+    assert ",3,16,0,2," in outs["boxed"]                                         # BorderStyle 3 = box
+    assert "Style: Cap,Anton," in outs["headline"] and "ONE{\\r} TWO" in outs["headline"]
+    assert "one two three four\\Nfive six seven" in outs["clean"]  # balanced two-line wrap
+    # upper/words overrides
+    st = captions.resolve_style({"style": {"preset": "pop", "upper": False, "words": 1}}, 76)
+    assert st["words"] == 1 and not st["upper"]

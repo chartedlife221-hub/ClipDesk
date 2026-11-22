@@ -176,3 +176,18 @@ def sample_frames(src: Path, times: list[float], width: int = 320) -> list[np.nd
             if img is not None:
                 frames.append(img)
     return frames
+
+
+def probe_image(path: Path) -> dict:
+    """codec/width/height of an image file (raises MediaError if ffprobe can't read it)."""
+    exe = ffprobe_bin()
+    if not exe:
+        raise MediaError("ffprobe not found on PATH")
+    p = subprocess.run([exe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,width,height",
+                        "-of", "json", str(path)], capture_output=True, text=True, timeout=30)
+    if p.returncode != 0:
+        raise MediaError("not an image")
+    st = (json.loads(p.stdout or "{}").get("streams") or [{}])[0]
+    if not st.get("codec_name"):
+        raise MediaError("not an image")
+    return {"codec": st["codec_name"], "width": st.get("width"), "height": st.get("height")}

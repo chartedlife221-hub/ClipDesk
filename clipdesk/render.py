@@ -19,14 +19,14 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-from .captions import build_ass, to_local
+from .captions import build_styled_ass, resolve_style, to_local
 from .config import CFG, PROJECT_ROOT, Settings
 from .media import probe, run_ffmpeg
 
 log = logging.getLogger("clipdesk.render")
 FONTS_DIR = Path(__file__).parent / "static" / "fonts"
 
-RENDER_VERSION = 5  # bump when encoder settings change so cached renders are redone
+RENDER_VERSION = 6  # bump when encoder settings change so cached renders are redone
 
 DEFAULT_LAYOUTS = {
     "speaker": {"mode": "speaker", "cx": 0.5, "zoom": 1.0, "caption_y": 0.80},
@@ -93,16 +93,34 @@ def video_graph(layout: dict, W: int, H: int, OW: int, OH: int) -> str:
     return f"[0:v]crop={cw}:{ch}:{int(x)}:{int(y)},scale={OW}:{OH}:flags=lanczos,setsar=1[vbase]"
 
 
-def render_key(source_id: str, rev: dict, kind: str, settings: Settings) -> str:
+def render_key(source_id: str, rev: dict, kind: str, settings: Settings, logo: Path | None = None) -> str:
+    lay = rev["layout"] or {}
+    logo_sig = None
+    if (lay.get("logo") or {}).get("on") and logo and Path(logo).exists():
+        st = Path(logo).stat()
+        logo_sig = [st.st_size, int(st.st_mtime)]
     blob = json.dumps({"src": source_id, "s": rev["start"], "e": rev["end"], "cap": rev["captions"],
-                       "lay": rev["layout"], "kind": kind, "font": settings.caption_font,
-                       "size": settings.caption_size, "v": RENDER_VERSION}, sort_keys=True)
+                       "lay": lay, "kind": kind, "font": settings.caption_font,
+                       "size": settings.caption_size, "logo": logo_sig, "v": RENDER_VERSION}, sort_keys=True)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+
+def logo_filter(idx: int, lay_logo: dict, OW: int, OH: int, in_label: str, out_label: str) -> str:
+    """Scale + fade the logo and place it in a corner with a 48 px margin."""
+    size = max(0.06, min(0.5, float(lay_logo.get("size", 0.18))))
+    op = max(0.2, min(1.0, float(lay_logo.get("opacity", 0.9))))
+    lw = _even(OW * size)
+    m = 48
+    x = {"tl": f"{m}", "bl": f"{m}", "tc": "(W-w)/2", "tr": f"W-w-{m}", "br": f"W-w-{m}"}.get(lay_logo.get("pos"), f"W-w-{m}")
+    y = {"bl": f"H-h-{m}", "br": f"H-h-{m}"}.get(lay_logo.get("pos"), f"{m}")
+    return (f"[{idx}:v]scale={lw}:-2:flags=lanczos,format=rgba,colorchannelmixer=aa={op:.2f}[lg];"
+            f"[{in_label}][lg]overlay={x}:{y}:format=auto[{out_label}]")
 
 
 def render_clip(src: Path, has_audio: bool, rev: dict, out: Path, *, kind: str, settings: Settings,
                 on_progress: Callable[[float], None] | None = None,
-                cancel: threading.Event | None = None) -> Path:
+                cancel: threading.Event | None = None, words: list[dict] | None = None,
+                logo: Path | None = None) -> Path:
     """Render [start,end] of `src` per revision to `out` (atomic). kind: 'preview' | 'final'."""
     info = probe(src)
     W, H = info["width"], info["height"]
@@ -114,12 +132,19 @@ def render_clip(src: Path, has_audio: bool, rev: dict, out: Path, *, kind: str, 
     work.mkdir(parents=True, exist_ok=True)
     local = to_local(rev.get("captions") or [], start, end)
     cap_y = _clamp(float(layout.get("caption_y", 0.8)), 0.1, 0.97)
-    size = int(layout.get("caption_size", settings.caption_size))
-    ass = build_ass(local, w=OW, h=OH, font=settings.caption_font, size=size, margin_v=int(OH * (1 - cap_y)))
+    style = resolve_style(layout, settings.caption_size)
+    local_words = [{"s": w["s"] - start, "e": w["e"] - start, "w": w["w"]} for w in (words or [])
+                   if w["e"] > start and w["s"] < end]
+    ass = build_styled_ass(local, local_words, style, w=OW, h=OH, margin_v=int(OH * (1 - cap_y)))
     (work / "captions.ass").write_text(ass, encoding="utf-8")
     graph = video_graph(layout, W, H, OW, OH)
+    lay_logo = layout.get("logo") or {}
+    use_logo = bool(lay_logo.get("on") and logo and Path(logo).exists())
+    logo_idx = 2 if not has_audio else 1
+    if use_logo:
+        graph += ";" + logo_filter(logo_idx, lay_logo, OW, OH, "vbase", "vlogo")
     fonts = FONTS_DIR.as_posix().replace(":", r"\:")  # Windows drive colon must be escaped in filter args
-    tail = f"[vbase]fps={CFG.fps},ass=captions.ass:fontsdir='{fonts}'"
+    tail = f"[{'vlogo' if use_logo else 'vbase'}]fps={CFG.fps},ass=captions.ass:fontsdir='{fonts}'"
     if kind == "preview":
         tail += f",scale={CFG.preview_w}:{CFG.preview_h}"
     graph += ";" + tail + ",format=yuv420p[vout]"
@@ -127,6 +152,8 @@ def render_clip(src: Path, has_audio: bool, rev: dict, out: Path, *, kind: str, 
     args = ["-ss", f"{start:.3f}", "-i", str(Path(src).resolve())]
     if not has_audio:
         args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+    if use_logo:
+        args += ["-i", str(Path(logo).resolve())]
     args += ["-t", f"{dur:.3f}", "-filter_complex", graph, "-map", "[vout]",
              "-map", "0:a:0" if has_audio else "1:a:0",
              "-c:v", "libx264", "-preset", "ultrafast" if kind == "preview" else "veryfast",

@@ -18,6 +18,8 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from . import __version__
+from . import brand
+from .brand import BrandError
 from .ingest import SourceURLError
 from .service import App, UserError, check_id
 
@@ -44,7 +46,7 @@ def create_app(svc: App | None = None, start_jobs: bool = True):
                 if isinstance(res, Response):
                     return res
                 return JSONResponse(res)
-            except (UserError, SourceURLError) as e:
+            except (UserError, SourceURLError, BrandError) as e:
                 return _err(str(e), 400)
             except json.JSONDecodeError:
                 return _err("Request body is not valid JSON.")
@@ -148,8 +150,12 @@ def create_app(svc: App | None = None, start_jobs: bool = True):
         return FileResponse(r["poster_path"], media_type="image/jpeg")
 
     def source_transcript(req, body):
-        tr = svc.transcript(p(req, "sid"))
-        return tr or {"words": [], "segments": []}
+        tr = svc.transcript(p(req, "sid")) or {"words": [], "segments": []}
+        q = req.query_params
+        if "s" in q and "e" in q:  # just the words of one clip (long streams have huge transcripts)
+            s0, e0 = float(q["s"]), float(q["e"])
+            return {"words": [w for w in tr.get("words", []) if w["e"] > s0 and w["s"] < e0]}
+        return tr
 
     def source_signals(req, body):
         return svc.signals(p(req, "sid"))
@@ -209,6 +215,38 @@ def create_app(svc: App | None = None, start_jobs: bool = True):
             name = (re.sub(r"[^A-Za-z0-9]+", "-", k["approved"]["title"] or kid).strip("-")[:50] or kid) + ".mp4"
             return FileResponse(path, media_type="video/mp4", filename=name)
         return FileResponse(path, media_type="video/mp4")
+
+    def brand_get(req, body):
+        owner = brand.check_owner(req.path_params["owner"])
+        if req.method == "PUT":
+            return brand.save_defaults(owner, body)
+        return brand.get(owner)
+
+    async def brand_logo_upload(request: Request):
+        try:
+            owner = brand.check_owner(request.path_params["owner"])
+            form = await request.form(max_files=1)
+            f = form.get("file")
+            if f is None or not hasattr(f, "filename"):
+                return _err("Choose an image.")
+            data = await f.read()
+            return JSONResponse(await run_in_threadpool(brand.save_logo, owner, data, f.filename or ""))
+        except BrandError as e:
+            return _err(str(e))
+
+    def brand_logo(req, body):
+        owner = brand.check_owner(req.path_params["owner"])
+        if req.method == "POST":
+            return brand.remove_logo(owner)
+        path = brand.logo_path(owner)
+        if not path:
+            return _err("No logo.", 404)
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+    def styles(req, body):
+        from .captions import HIGHLIGHTS, PRESETS
+        return {"presets": {k: {kk: v[kk] for kk in ("label", "font", "upper", "words", "mode", "box", "outline", "wf", "size", "bold")}
+                            for k, v in PRESETS.items()}, "highlights": HIGHLIGHTS}
 
     def export(req, body):
         return svc.request_export(body.get("clip_ids") or None, body.get("source_id") or None)
@@ -270,6 +308,11 @@ def create_app(svc: App | None = None, start_jobs: bool = True):
         Route("/api/clips/{kid}/render", H(clip_render), methods=["POST"]),
         Route("/api/clips/{kid}/{kind:str}.mp4", H(clip_file)),
         Route("/api/export", H(export), methods=["POST"]),
+        Route("/api/styles", H(styles)),
+        Route("/api/brand/{owner}", H(brand_get), methods=["GET", "PUT"]),
+        Route("/api/brand/{owner}/logo", brand_logo_upload, methods=["PUT"]),
+        Route("/api/brand/{owner}/logo.png", H(brand_logo), methods=["GET"]),
+        Route("/api/brand/{owner}/logo/remove", H(brand_logo), methods=["POST"]),
         Route("/api/exports/{name:str}", H(export_file)),
         Route("/api/jobs", H(jobs)),
         Route("/api/jobs/{jid}", H(job_one)),

@@ -403,6 +403,9 @@ async function selectClip(id, seek) {
   const k = await api(`/api/clips/${id}`);
   if (S.ws !== ws || token !== ws.selSeq) return;
   ws.clip = k; ws.rev = structuredClone(k.rev);
+  ws.words = [];
+  if (ws.src.transcript_status === "ready")
+    api(`/api/sources/${ws.sid}/transcript?s=${Math.max(0, k.rev.start - 60)}&e=${k.rev.end + 60}`).then((d) => { if (S.ws === ws) ws.words = d.words || []; }).catch(() => {});
   ws.sel = { s: k.rev.start, e: k.rev.end };
   history.replaceState(null, "", `#/source/${ws.sid}/${id}`);
   if (seek) ws.video.currentTime = k.rev.start;
@@ -434,7 +437,7 @@ function renderEditor() {
       <button class="btn approve" id="bApprove" title="Shortcut A">${icon("check")}Approve</button>
       <button class="btn reject" id="bReject" title="Shortcut R">${icon("x")}Reject</button>
       <button class="btn" id="bUndo" title="Shortcut U" ${k.can_undo ? "" : "disabled"} aria-label="Undo">${icon("undo")}<span class="lbl-long">Undo</span></button>
-      <button class="btn primary" id="bExport" title="Shortcut E" data-busy="Rendering…">${icon("download")}${exportLabel}</button>
+      <button class="btn primary" id="bExport" title="Shortcut E" data-busy="Rendering…">${icon("download")}<span class="lbl-long">${exportLabel}</span><span class="lbl-short">Export</span></button>
     </div>
     <div class="row" style="margin-top:8px;justify-content:center">
       <button class="btn sm quiet" id="bRender" title="Shortcut V" data-busy="Rendering…">${icon("film")}Render preview file</button>
@@ -442,15 +445,15 @@ function renderEditor() {
       <span id="saveState" class="small faint" aria-live="polite"></span>
     </div>
     <div class="tabs" role="tablist" aria-label="Clip settings">
-      ${[["frame", "crop", "Framing"], ["caps", "type", "Captions"], ["info", "sliders", "Details"]].map(([id, ic, lb]) => `<button role="tab" data-it="${id}" aria-selected="${ws.itab === id}">${icon(ic)}${lb}</button>`).join("")}
+      ${[["frame", "crop", "Framing"], ["style", "spark", "Style"], ["caps", "type", "Captions"], ["info", "sliders", "Details"]].map(([id, ic, lb]) => `<button role="tab" data-it="${id}" aria-selected="${ws.itab === id}">${icon(ic)}${lb}</button>`).join("")}
     </div>
     <div data-ip="frame" ${ws.itab === "frame" ? "" : "hidden"}>
       <div class="seg" role="radiogroup" aria-label="Framing" style="display:flex;margin-bottom:12px">
         ${[["speaker", "user", "Speaker"], ["fit", "film", "Full frame"], ["gameplay", "gamepad", "Game + cam"]].map(([m, ic, lb]) => `<button role="radio" data-mode="${m}" aria-checked="${mode === m}" aria-pressed="${mode === m}" style="flex:1;justify-content:center">${icon(ic)}${lb}</button>`).join("")}
       </div>
       <div id="layoutCtl" class="sliders"></div>
-      <div style="margin-top:12px"><label for="capY">Caption height</label><input type="range" id="capY" min="0.15" max="0.95" step="0.01" value="${L.caption_y ?? 0.8}"></div>
     </div>
+    <div data-ip="style" ${ws.itab === "style" ? "" : "hidden"} id="stylePane"></div>
     <div data-ip="caps" ${ws.itab === "caps" ? "" : "hidden"}>
       <div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="small muted">Times are in the recording. Tap a time to jump.</span><button class="btn sm" id="addCap">${icon("plus")}Line at playhead</button></div>
       <div class="caps" id="caps"></div>
@@ -468,7 +471,6 @@ function renderEditor() {
   if (ws.pv === "file" && (prev || fin)) { cv.hidden = true; vf.hidden = false; vf.src = prev ? `/api/clips/${k.id}/preview.mp4?r=${prev.rev}` : `/api/clips/${k.id}/download.mp4`; }
   ws.canvas = cv;
   $$("[data-mode]").forEach((b) => (b.onclick = () => setLayout({ mode: b.dataset.mode }, true)));
-  $("#capY").oninput = (e) => setLayout({ caption_y: +e.target.value });
   if ($("#title")) $("#title").oninput = (e) => { ws.rev.title = e.target.value; queueSave({ title: ws.rev.title }); };
   if ($("#tags")) $("#tags").oninput = (e) => { ws.rev.hashtags = e.target.value.split(/\s+/).filter(Boolean); queueSave({ hashtags: ws.rev.hashtags }); };
   $("#addCap").onclick = () => {
@@ -482,7 +484,163 @@ function renderEditor() {
   $("#bUndo").onclick = undo;
   $("#bRender").onclick = (e) => renderPreview(e.currentTarget);
   $("#bExport").onclick = (e) => exportClip(e.currentTarget);
-  drawLayoutCtl(); drawCaps();
+  drawLayoutCtl(); drawCaps(); drawStylePane();
+}
+
+/* ---------- caption style + logo (v0.3) ---------- */
+function curStyle() {
+  const L = S.ws.rev.layout || {};
+  return { preset: "clean", color: "#FFE14D", words: null, upper: null, ...(L.style || {}) };
+}
+function resolveStyle(L) {  // mirrors captions.resolve_style
+  const st = { preset: "clean", color: "#FFE14D", words: null, upper: null, ...((L || {}).style || {}) };
+  const p = S.styles.presets[st.preset] || S.styles.presets.clean;
+  const base = (L || {}).caption_size || S.system.settings.caption_size;
+  return { ...p, preset: st.preset, color: /^#[0-9a-f]{6}$/i.test(st.color || "") ? st.color : "#FFE14D",
+    words: st.words == null || st.words === "" ? p.words : clamp(+st.words, 0, 8), upper: st.upper == null ? p.upper : !!st.upper,
+    px: Math.round(base * p.size) };
+}
+const LOGO_DEFAULT = { on: false, pos: "tr", size: 0.18, opacity: 0.9 };
+function drawStylePane() {
+  const ws = S.ws, el = $("#stylePane"); if (!el || !ws.clip) return;
+  const L = ws.rev.layout || {}, st = curStyle(), eff = resolveStyle(L), lg = { ...LOGO_DEFAULT, ...(L.logo || {}) };
+  const owner = ws.clip.brand_owner, who = ws.src.creator_name || "recordings with no creator";
+  const sample = (k, p) => {
+    const words = p.upper ? ["YOUR", "BEST", "MOMENT"] : ["Your", "best", "moment"];
+    const fam = p.font === "Anton" ? "Anton" : "Fira Sans", wt = p.font === "Fira Sans ExtraBold" ? 800 : 700;
+    const html = words.map((w, i) => p.mode === "line" ? w : p.mode === "pop" ? (i === 1 ? `<span style="color:${esc(st.color)};font-size:1.12em">${w}</span>` : w)
+      : i === 0 ? w : i === 1 ? `<span style="color:${esc(st.color)}">${w}</span>` : `<span style="opacity:.55">${w}</span>`).join(" ");
+    return `<span class="sample${p.box ? " box" : ""}" style="font-family:'${fam}';font-weight:${wt}">${html}</span>`;
+  };
+  el.innerHTML = `
+    <div class="presets" role="radiogroup" aria-label="Caption style">
+      ${Object.entries(S.styles.presets).map(([k, p]) => `<button class="preset" role="radio" data-preset="${k}" aria-checked="${st.preset === k}">${sample(k, p)}<span class="pname">${esc(p.label)}</span></button>`).join("")}
+    </div>
+    ${eff.mode !== "line" ? `<div class="field" style="margin-top:16px"><span class="label" id="hlLbl">Highlight colour</span>
+      <div class="swatches" role="radiogroup" aria-labelledby="hlLbl">${S.styles.highlights.map((c) => `<button class="swatch" role="radio" data-color="${c}" aria-checked="${st.color.toUpperCase() === c}" aria-label="${c}" style="--c:${c}"></button>`).join("")}
+        <label class="swatch custom" aria-label="Custom colour" style="--c:${esc(st.color)}"><input type="color" id="hlCustom" value="${esc(st.color)}"></label></div></div>` : ""}
+    <div class="field" style="margin-top:16px"><span class="label" id="wLbl">Words on screen</span>
+      <div class="seg" role="radiogroup" aria-labelledby="wLbl" style="display:flex">${[[1, "1 word"], [3, "3 words"], [0, "Full line"]].map(([v, l]) => `<button role="radio" data-words="${v}" aria-checked="${eff.words === v}" aria-pressed="${eff.words === v}" style="flex:1;justify-content:center">${l}</button>`).join("")}</div></div>
+    <div class="sliders">
+      <div><label for="capSize">Size</label><input type="range" id="capSize" min="50" max="110" step="1" value="${L.caption_size || S.system.settings.caption_size}"></div>
+      <div><label for="capY">Height on screen</label><input type="range" id="capY" min="0.15" max="0.95" step="0.01" value="${L.caption_y ?? 0.8}"></div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="capUpper" ${eff.upper ? "checked" : ""}>All capitals</label>
+    <div class="logo-box">
+      <div class="panel-head" style="margin:0 0 8px"><h3>Logo</h3>${ws.clip.has_logo ? `<label class="toggle" style="min-height:32px"><input type="checkbox" id="logoOn" ${lg.on ? "checked" : ""}>Show on this clip</label>` : ""}</div>
+      ${ws.clip.has_logo ? `
+        <div class="row" style="align-items:center;gap:12px"><img class="logo-thumb" src="/api/brand/${owner}/logo.png?v=${ws.logoV || 0}" alt="Current logo for ${esc(who)}">
+          <div class="row"><button class="btn sm" id="logoUp">${icon("upload")}Replace</button><button class="btn sm quiet" id="logoRm">Remove</button></div></div>
+        <div ${lg.on ? "" : "hidden"} style="margin-top:12px">
+          <span class="label" id="posLbl">Corner</span>
+          <div class="seg" role="radiogroup" aria-labelledby="posLbl" style="display:flex;margin-bottom:12px">${[["tl", "Top left"], ["tc", "Top"], ["tr", "Top right"], ["bl", "Bottom left"], ["br", "Bottom right"]].map(([v, l]) => `<button role="radio" data-lpos="${v}" aria-checked="${lg.pos === v}" aria-pressed="${lg.pos === v}" style="flex:1;justify-content:center;padding:0 4px">${l}</button>`).join("")}</div>
+          <div class="sliders"><div><label for="logoSize">Size</label><input type="range" id="logoSize" min="0.06" max="0.5" step="0.01" value="${lg.size}"></div>
+          <div><label for="logoOp">Opacity</label><input type="range" id="logoOp" min="0.2" max="1" step="0.05" value="${lg.opacity}"></div></div>
+        </div>`
+      : `<p class="help" style="margin:0 0 8px">Add a logo for ${esc(who)}. PNG with a transparent background works best.</p><button class="btn sm" id="logoUp">${icon("upload")}Upload logo</button>`}
+      <input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp" class="sr" tabindex="-1">
+    </div>
+    <button class="btn" id="saveKit" style="width:100%;margin-top:16px" data-busy="Saving…">${icon("check")}Use this look for all new ${esc(ws.src.creator_name || "clips without a creator")} clips</button>`;
+  $$("[data-preset]", el).forEach((b) => (b.onclick = () => setLayout({ style: { ...curStyle(), preset: b.dataset.preset, words: null, upper: null } }, "style")));
+  $$("[data-color]", el).forEach((b) => (b.onclick = () => setLayout({ style: { ...curStyle(), color: b.dataset.color } }, "style")));
+  if ($("#hlCustom")) $("#hlCustom").onchange = (e) => setLayout({ style: { ...curStyle(), color: e.target.value.toUpperCase() } }, "style");
+  $$("[data-words]", el).forEach((b) => (b.onclick = () => setLayout({ style: { ...curStyle(), words: +b.dataset.words } }, "style")));
+  $("#capUpper").onchange = (e) => setLayout({ style: { ...curStyle(), upper: e.target.checked } });
+  $("#capSize").oninput = (e) => setLayout({ caption_size: +e.target.value });
+  $("#capY").oninput = (e) => setLayout({ caption_y: +e.target.value });
+  const lgSet = (patch, re) => setLayout({ logo: { ...LOGO_DEFAULT, ...(ws.rev.layout.logo || {}), ...patch } }, re ? "style" : false);
+  if ($("#logoOn")) $("#logoOn").onchange = (e) => lgSet({ on: e.target.checked }, true);
+  $$("[data-lpos]", el).forEach((b) => (b.onclick = () => lgSet({ pos: b.dataset.lpos }, true)));
+  if ($("#logoSize")) $("#logoSize").oninput = (e) => lgSet({ size: +e.target.value });
+  if ($("#logoOp")) $("#logoOp").oninput = (e) => lgSet({ opacity: +e.target.value });
+  $("#logoUp").onclick = () => $("#logoFile").click();
+  $("#logoFile").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    try { const r = await fetch(`/api/brand/${owner}/logo`, { method: "PUT", body: fd }); const d = await r.json(); if (!r.ok) throw new Error(d.error);
+      ws.logoV = Date.now(); ws.logoImg = null; ws.clip.has_logo = true; lgSet({ on: true }, true); toast(`Logo added for ${esc(who)}`); }
+    catch (er) { fail(er); }
+  };
+  if ($("#logoRm")) $("#logoRm").onclick = async () => {
+    try { await api(`/api/brand/${owner}/logo/remove`, { json: {} }); ws.clip.has_logo = false; ws.logoImg = null; lgSet({ on: false }, true); toast("Logo removed"); }
+    catch (er) { fail(er); }
+  };
+  $("#saveKit").onclick = (e) => busy(e.currentTarget, async () => {
+    const lay = ws.rev.layout || {};
+    try { await api(`/api/brand/${owner}`, { method: "PUT", json: { style: curStyle(), logo: { ...LOGO_DEFAULT, ...(lay.logo || {}) }, caption_size: lay.caption_size } });
+      toast(`New ${esc(ws.src.creator_name || "")} clips will start with this look`); }
+    catch (er) { fail(er); }
+  });
+}
+function logoImage() {
+  const ws = S.ws; if (!ws.clip?.has_logo) return null;
+  const src = `/api/brand/${ws.clip.brand_owner}/logo.png?v=${ws.logoV || 0}`;
+  if (!ws.logoImg || ws.logoImg.dataset.src !== src) { ws.logoImg = new Image(); ws.logoImg.dataset.src = src; ws.logoImg.src = src; }
+  return ws.logoImg.complete && ws.logoImg.naturalWidth ? ws.logoImg : null;
+}
+/* word timing + chunking — mirrors captions.line_words / chunk_words / wrap_words */
+const normTok = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+function lineWords(line, tr) {
+  const toks = line.text.split(/\s+/).filter(Boolean); if (!toks.length) return [];
+  const s = +line.s, e = +line.e;
+  const cand = (tr || []).filter((w) => w.e > s + 0.01 && w.s < e - 0.01);
+  if (cand.length === toks.length && cand.every((w, i) => normTok(w.w) === normTok(toks[i])))
+    return toks.map((t, i) => { const ws = i === 0 ? s : Math.max(s, cand[i].s), we = i === toks.length - 1 ? e : Math.min(e, cand[i].e); return { s: ws, e: Math.max(we, ws + 0.04), w: t }; });
+  const total = toks.reduce((a, t) => a + t.length + 1, 0); let t0 = s;
+  const out = toks.map((t) => { const d = (e - s) * (t.length + 1) / total, o = { s: t0, e: t0 + d, w: t }; t0 += d; return o; });
+  out[out.length - 1].e = e; return out;
+}
+function chunkWords(line, words, n) {
+  if (!words.length) return [];
+  const groups = n <= 0 ? [words] : Array.from({ length: Math.ceil(words.length / n) }, (_, i) => words.slice(i * n, i * n + n));
+  return groups.map((g, gi) => ({ s: gi === 0 ? +line.s : g[0].s, e: gi === groups.length - 1 ? +line.e : groups[gi + 1][0].s, words: g }));
+}
+function wrapIdx(toks, n) { const rows = wrapText(toks.join(" "), n); let i = 0; return rows.map((r) => { const k = r.split(" ").length, o = []; for (let j = 0; j < k; j++) o.push(i++); return o; }); }
+function drawCaption(g, OW, OH, t, L) {
+  const ws = S.ws, st = resolveStyle(L), k = OH / 1920;
+  const line = (ws.rev.captions || []).find((c) => t >= c.s && t < c.e && c.s < ws.rev.end && c.e > ws.rev.start);
+  if (!line || t < ws.rev.start || t > ws.rev.end) return;
+  const ch = chunkWords(line, lineWords(line, ws.words), st.words).find((c) => t >= c.s && t < c.e); if (!ch) return;
+  const toks = ch.words.map((w) => st.upper ? w.w.toUpperCase() : w.w);
+  let active = -1; ch.words.forEach((w, i) => { const a = i === 0 ? ch.s : w.s, b = i === ch.words.length - 1 ? ch.e : ch.words[i + 1].s; if (t >= a && t < b) active = i; });
+  // libass sizes text by the font's Windows ascent+descent, not its em: [em per size unit, descent share]
+  const fam = st.font === "Anton" ? "Anton" : "Fira Sans", wt = st.font === "Fira Sans ExtraBold" ? 800 : st.bold ? 700 : 400;
+  const [emPer, desc] = fam === "Anton" ? [0.577, 0.19] : [0.833, 0.221];
+  const size = st.px * k, em = size * emPer;
+  const font = (sc) => `${wt} ${em * sc}px "${fam}", sans-serif`;
+  const rows = wrapIdx(toks, Math.max(8, Math.floor((1080 - 180) / (st.px * st.wf))));
+  const bottom = OH * clamp(L.caption_y ?? 0.8, 0.1, 0.97), lh = size;
+  g.textBaseline = "alphabetic"; g.lineJoin = "round";
+  rows.forEach((r, ri) => {
+    const y = bottom - (rows.length - 1 - ri) * lh - size * desc;
+    const parts = r.map((i) => { const sc = st.mode === "pop" && i === active ? 1.12 : 1; g.font = font(sc); return { i, sc, w: g.measureText(toks[i]).width }; });
+    g.font = font(1); const sp = g.measureText(" ").width;
+    const total = parts.reduce((a, p) => a + p.w, 0) + sp * (parts.length - 1);
+    let x = OW / 2 - total / 2;
+    if (st.box) { const pad = st.outline * k; g.fillStyle = "rgba(16,19,24,.78)"; g.fillRect(x - pad, y - size * (1 - desc) - pad, total + pad * 2, size + pad * 2); }
+    parts.forEach((p) => {
+      g.font = font(p.sc);
+      let col = "#fff", alpha = 1;
+      if (st.mode === "pop" && p.i === active) col = st.color;
+      if (st.mode === "karaoke") { if (p.i === active) col = st.color; else if (p.i > active) alpha = 0.56; }
+      g.globalAlpha = alpha;
+      if (!st.box) {
+        if (st.shadow) { g.fillStyle = "rgba(0,0,0,.45)"; g.fillText(toks[p.i], x + st.shadow * k, y + st.shadow * k); }
+        g.lineWidth = st.outline * 2 * k; g.strokeStyle = "#000"; g.strokeText(toks[p.i], x, y);
+      }
+      g.fillStyle = col; g.fillText(toks[p.i], x, y);
+      g.globalAlpha = 1;
+      x += p.w + sp;
+    });
+  });
+}
+function drawLogo(g, OW, OH, L) {
+  const lg = { ...LOGO_DEFAULT, ...(L.logo || {}) }; if (!lg.on) return;
+  const img = logoImage(); if (!img) return;
+  const k = OH / 1920, w = OW * clamp(lg.size, 0.06, 0.5), h = w * img.naturalHeight / img.naturalWidth, m = 48 * k;
+  const x = { tl: m, bl: m, tc: (OW - w) / 2, tr: OW - w - m, br: OW - w - m }[lg.pos] ?? OW - w - m;
+  const y = lg.pos === "bl" || lg.pos === "br" ? OH - h - m : m;
+  g.globalAlpha = clamp(lg.opacity, 0.2, 1); g.drawImage(img, x, y, w, h); g.globalAlpha = 1;
 }
 function drawLayoutCtl() {
   const ws = S.ws, L = ws.rev.layout || {}, el = $("#layoutCtl"); if (!el) return;
@@ -521,7 +679,7 @@ function setLayout(patch, rerender = false) {
   if (patch.mode && patch.mode !== ws.rev.layout.mode) ws.rev.layout = { ...DEFAULT_LAYOUTS[patch.mode] };
   else ws.rev.layout = { ...ws.rev.layout, ...patch };
   queueSave({ layout: ws.rev.layout });
-  if (rerender) { renderEditor(); } else layoutOverlay();
+  if (rerender === "style") drawStylePane(); else if (rerender) renderEditor(); else layoutOverlay();
 }
 
 /* ---------- saving ---------- */
@@ -769,15 +927,10 @@ function drawPreview() {
     coverDraw(g, v, f.x * W, f.y * H, f.w * W, f.h * H, 0, 0, OW, fh);
     coverDraw(g, v, a.x * W, a.y * H, a.w * W, a.h * H, 0, fh, OW, OH - fh);
   } else { const r = speakerRect(L, W, H); g.drawImage(v, r.x, r.y, r.w, r.h, 0, 0, OW, OH); }
-  const t = v.currentTime, cap = (ws.rev.captions || []).find((c) => t >= c.s && t < c.e && c.s < ws.rev.end && c.e > ws.rev.start);
-  if (cap && t >= ws.rev.start && t <= ws.rev.end) {
-    const k = OH / 1920, size = (L.caption_size || S.system.settings.caption_size) * k, maxChars = Math.max(10, Math.floor((1080 - 180) / (size / k * 0.52)));
-    const lines = wrapText(cap.text, maxChars);
-    g.font = `700 ${size}px "Fira Sans", sans-serif`; g.textAlign = "center"; g.textBaseline = "bottom"; g.lineJoin = "round";
-    g.lineWidth = 10 * k; g.strokeStyle = "#000"; g.fillStyle = "#fff";
-    const bottom = OH * clamp(L.caption_y ?? 0.8, 0.1, 0.97), lh = size * 1.18;
-    lines.forEach((ln, i) => { const y = bottom - (lines.length - 1 - i) * lh; g.strokeText(ln, OW / 2, y); g.fillText(ln, OW / 2, y); });
-  }
+  const t = v.currentTime;
+  drawLogo(g, OW, OH, L);          // same order as the export: logo, then captions on top
+  g.textAlign = "left";
+  drawCaption(g, OW, OH, t, L);
   if (t < ws.rev.start - 0.05 || t > ws.rev.end + 0.05) {
     g.fillStyle = "rgba(26,31,43,.72)"; g.fillRect(0, 0, OW, OH); g.fillStyle = "#EEF0F5"; g.font = `600 15px "DM Sans", sans-serif`; g.textAlign = "center";
     g.fillText("The playhead is outside this clip", OW / 2, OH / 2 - 10); g.fillStyle = "#A9B1C3"; g.fillText("Press P to play the clip", OW / 2, OH / 2 + 14);
@@ -1059,6 +1212,7 @@ matchMedia("(max-width: 899px)").addEventListener("change", () => { if (S.view =
 
 /* ================================================================== BOOT */
 (async function boot() {
-  try { await loadSystem(); } catch (e) { $("#main").innerHTML = `<div class="panel empty">${icon("alert")}<h2>Can't reach ClipDesk</h2><p>${esc(e.message)}. Start it with python run.py and reload this page.</p></div>`; return; }
+  try { await loadSystem(); S.styles = await api("/api/styles"); } catch (e) { $("#main").innerHTML = `<div class="panel empty">${icon("alert")}<h2>Can't reach ClipDesk</h2><p>${esc(e.message)}. Start it with python run.py and reload this page.</p></div>`; return; }
+  ["700 20px 'Fira Sans'", "800 20px 'Fira Sans'", "20px Anton"].forEach((f) => document.fonts.load(f).catch(() => {}));
   await route(); pollJobs();
 })();

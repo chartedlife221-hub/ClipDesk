@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import detect, ingest, media, score, transcribe
+from . import brand, detect, ingest, media, score, transcribe
 from .captions import build_srt, to_local
 from .config import CFG, Settings, data_root
 from .db import DB, new_id, now
@@ -526,6 +526,9 @@ class App:
         k["candidate"] = self.db.one("SELECT * FROM candidates WHERE id=?", [k["candidate_id"]]) if k["candidate_id"] else None
         k["can_undo"] = bool(self.db.one("SELECT id FROM actions WHERE clip_id=? AND undone=0 LIMIT 1", [kid]))
         k["edited_since_approval"] = bool(k["approved_rev"] and k["approved_rev"] != k["current_rev"])
+        k["brand_owner"] = brand.owner_for(k["creator_id"])
+        _, logo = brand.kit_for(k["creator_id"])
+        k["has_logo"] = logo is not None
         k["renders"] = self.db.all("SELECT id,rev,kind,status,created FROM renders WHERE clip_id=? AND status='done' "
                                    "ORDER BY created DESC", [kid])
         k["job"] = self.db.one("SELECT id,kind,status,stage,progress,message,error,payload FROM jobs WHERE clip_id=? "
@@ -596,6 +599,20 @@ class App:
         elif ("start" in data or "end" in data):
             new["captions"] = self._refresh_captions(k["source_id"], new["captions"], new["start"], new["end"])
         if "layout" in data and isinstance(data["layout"], dict):
+            incoming = dict(data["layout"])
+            if "logo" in incoming:
+                incoming["logo"] = brand.clean_logo_settings(incoming["logo"])
+            if "style" in incoming:
+                from .captions import PRESETS
+                st = dict(incoming["style"] or {})
+                if st.get("preset") not in PRESETS:
+                    raise UserError("Unknown caption style.")
+                if not re.match(r"^#[0-9A-Fa-f]{6}$", str(st.get("color", "#FFE14D"))):
+                    raise UserError("Colour must look like #FFE14D.")
+                incoming["style"] = st
+            if "caption_size" in incoming:
+                incoming["caption_size"] = max(40, min(120, int(incoming["caption_size"])))
+            data = {**data, "layout": incoming}
             lay = {**(new["layout"] or {}), **data["layout"]}
             if data["layout"].get("mode") and data["layout"]["mode"] != (cur["layout"] or {}).get("mode"):
                 lay = {**default_layout(data["layout"]["mode"]), **data["layout"]}
@@ -618,9 +635,14 @@ class App:
     def _layout_for(self, sid: str, mode: str) -> dict:
         """Default layout for a new clip, with the framing last used on this source (fixes off-centre speakers)."""
         lay = default_layout(mode)
-        r = self.db.one("SELECT layout_memory FROM sources WHERE id=?", [sid])
+        r = self.db.one("SELECT layout_memory, creator_id FROM sources WHERE id=?", [sid])
         mem = (r or {}).get("layout_memory") or {}
         lay.update({k: v for k, v in (mem.get(mode) or {}).items() if k in self.REMEMBER.get(mode, ())})
+        # the creator's brand kit (caption style, logo, size) applies to every new clip
+        defaults, _ = brand.kit_for((r or {}).get("creator_id"))
+        for k in ("style", "logo", "caption_size"):
+            if defaults.get(k) is not None:
+                lay[k] = json.loads(json.dumps(defaults[k]))
         return lay
 
     def _remember_layout(self, sid: str, lay: dict) -> None:
@@ -788,14 +810,17 @@ class App:
         k = self.db.one("SELECT * FROM clips WHERE id=?", [kid])
         rev = self.db.one("SELECT * FROM revisions WHERE id=? AND clip_id=?", [rev_id, kid])
         src = self.db.one("SELECT * FROM sources WHERE id=?", [k["source_id"]])
-        key = render_key(src["id"], rev, kind, self.settings)
+        _, logo = brand.kit_for(src["creator_id"])
+        key = render_key(src["id"], rev, kind, self.settings, logo)
         existing = self.db.one("SELECT * FROM renders WHERE key=? AND status='done'", [key])
         if existing and Path(existing["path"]).exists():
             return Path(existing["path"])
         out = self.root / "renders" / kid / f"r{rev_id}_{kind}_{key}.mp4"
+        tr = self.transcript(src["id"]) or {}
+        words = [w for w in tr.get("words", []) if w["e"] > rev["start"] and w["s"] < rev["end"]]
         render_clip(Path(src["media_path"]), bool(src["has_audio"]), rev, out, kind=kind, settings=self.settings,
                     on_progress=(lambda f: ctx.progress(f, f"rendering {kind} {int(f * 100)}%", "render")) if ctx else None,
-                    cancel=ctx.cancel if ctx else None)
+                    cancel=ctx.cancel if ctx else None, words=words, logo=logo)
         self.db.exec("INSERT OR REPLACE INTO renders (id,clip_id,rev,kind,key,path,status,created) VALUES (?,?,?,?,?,?,?,?)",
                      [new_id("rnd"), kid, rev_id, kind, key, str(out), "done", now()])
         return out

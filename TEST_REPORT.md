@@ -122,3 +122,19 @@ Same workspace, Chrome via Playwright at 1440×900 (desktop) and 375×812 with t
 | 37 | Automated tests | **PASS** | 31 passed (2 new: snapping/framing memory/filmstrip, v0.1 database migration) |
 
 Still pending, as in v0.1: your YouTube link, live Whisper transcription, face auto-centre, real AI ranking, Windows/macOS.
+
+
+---
+
+# v0.3 addendum (2026-11-22): caption styles and logo
+
+| # | Check | Result | Observed |
+|---|---|---|---|
+| 38 | All 5 presets render | **PASS** | Clean, Pop, Karaoke, Boxed, Headline rendered through the API on the talk sample; frames show the expected look for each |
+| 39 | Live preview vs exported frame | **PASS after fix** | first comparison: preview text ~15 % too large (libass sizes by the font's ascent+descent, 0.833 em for Fira Sans, 0.577 em for Anton); corrected and re-compared for Pop, Boxed and Headline: same size, position, highlight |
+| 40 | Logo overlay | **PASS** | top right, top left (60 % opacity), top centre placed correctly; unreadable file rejected with "That file isn't an image ClipDesk can read." |
+| 41 | Creator defaults | **PASS** | after saving a kit (Pop + logo), the next clip for that creator started with Pop and the logo on (automated test) |
+| 42 | Input checks | **PASS** | unknown preset and non-hex colour rejected (automated test) |
+| 43 | Sample exports | **PASS** | 3 × 19.7 s, 1080×1920 H.264/AAC, 0.7–0.8 MB, about 10 s to render each on 2 vCPU |
+| 44 | Phone Style tab | **PASS after fix** | dock button label was cut off; now reads "Export" on phones |
+| 45 | Automated tests | **PASS** | 34 passed (3 new) |

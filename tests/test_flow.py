@@ -197,3 +197,42 @@ def test_v01_database_migrates(data_dir):
     DB(db)
     cols = [r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(sources)")]
     assert "layout_memory" in cols
+
+
+def test_v03_brand_kit_and_styled_render(data_dir, tiny_video, tmp_path):
+    from clipdesk import brand
+    app = App()
+    app.jobs.start()
+    try:
+        cr = app.add_creator("Brand Co", "streamer")
+        logo = tmp_path / "logo.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=200x80", "-frames:v", "1", str(logo)], check=True)
+        with pytest.raises(brand.BrandError):
+            brand.save_logo(cr["id"], b"<svg onload=alert(1)>", "x.svg")
+        b = brand.save_logo(cr["id"], logo.read_bytes(), "logo.png")
+        assert b["has_logo"]
+        brand.save_defaults(cr["id"], {"style": {"preset": "pop", "color": "#3CF2A3"},
+                                       "logo": {"on": True, "pos": "tl", "size": 0.2, "opacity": 0.8}})
+        with pytest.raises(brand.BrandError):
+            brand.save_defaults(cr["id"], {"style": {"preset": "nope"}})
+        with open(tiny_video, "rb") as f:
+            s = app.add_upload_source("tiny.mp4", f, cr["id"], "speech")
+        s = wait_source(app, s["id"])
+        k = app.create_manual_clip(s["id"], 2.0, 8.0, layout_mode="speaker")
+        assert k["rev"]["layout"]["style"]["preset"] == "pop" and k["rev"]["layout"]["logo"]["on"]
+        k = app.revise(k["id"], {"captions": [{"s": 2.5, "e": 5.0, "text": "hello there friend"}]})
+        with pytest.raises(UserError):
+            app.revise(k["id"], {"layout": {"style": {"preset": "pop", "color": "red; drop table"}}})
+        app.set_status(k["id"], "approved")
+        j = app.jobs.wait(app.request_render(k["id"], "final")["id"], 300)
+        assert j["status"] == "done", j["error"]
+        out = app.render_file(k["id"], "final")
+        ass = out.with_suffix(".ass").read_text()
+        assert "HELLO" in ass and "\\fscx112" in ass
+        # logo pixels: top-left corner area should be red-ish in the output
+        frame = subprocess.run(["ffmpeg", "-v", "error", "-ss", "1", "-i", str(out), "-frames:v", "1", "-vf", "crop=60:40:60:60",
+                                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+        r, g, bb = frame[0::3], frame[1::3], frame[2::3]
+        assert sum(r) / len(r) > 150 and sum(g) / len(g) < 110
+    finally:
+        app.jobs.stop()

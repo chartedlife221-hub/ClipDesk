@@ -1,4 +1,4 @@
-# ClipDesk: owner test build (v0.2.0, November 2026)
+# ClipDesk: owner test build (v0.3.0, November 2026)
 
 ClipDesk is a local clipping workspace. You import a stream replay or a talk, find a moment by describing it (or jump to a timestamp you already know), frame it 9:16, edit captions, approve it, and export a 1080×1920 MP4 or a ZIP of every approved clip.
 
@@ -21,6 +21,27 @@ Notes:
 - The first transcription downloads the Whisper model inside the codespace.
 - YouTube sometimes blocks downloads from cloud servers ("Sign in to confirm you're not a bot"). ClipDesk shows that as *Inaccessible*. If it happens, upload the file instead, or run ClipDesk on your own computer.
 - Rendering is slower on the default 2-core codespace; pick a 4-core machine type for faster exports.
+
+## What's new in v0.3: Shorts caption styles
+
+Open a clip and go to the **Style** tab.
+
+| Preset | Look |
+|---|---|
+| Clean | White bold captions with an outline (the v0.2 look) |
+| Pop | Uppercase, extra-bold; the word being spoken turns your highlight colour and grows |
+| Karaoke | Words fill in as they're spoken: said = white, now = colour, upcoming = dimmed |
+| Boxed | White text on a dark box, readable on any background |
+| Headline | Tall condensed type (Anton), two words at a time, highlight on the spoken word |
+
+- **Highlight colour:** five swatches or any custom colour.
+- **Words on screen:** 1, 3 or the full line. Pop and Headline default to short bursts.
+- **All capitals, size and height on screen.**
+- **Logo:** upload one per creator (or a general one for clips without a creator), pick a corner, size and opacity. Logos are re-encoded to PNG by FFmpeg before use.
+- **"Use this look for all new … clips"** saves the style and logo as that creator's default; every new clip, found or made by hand, starts with it.
+- Word timing comes from the transcript. If you've edited a caption line, its timing is spread across the words instead.
+- The live preview uses the same fonts, sizes, wrapping, outline, box and highlight timing as the export (checked frame against frame).
+- The `.srt` in ZIP exports stays plain text; the `.ass` file carries the styling.
 
 ## What's new in v0.2
 
@@ -166,7 +187,7 @@ All under `clipdesk-data/` next to `run.py`. Set `CLIPDESK_DATA=/path` to move i
 
 ```bash
 pip install pytest requests
-python -m pytest -q          # 31 tests: units + full service flow + live HTTP server (needs ffmpeg)
+python -m pytest -q          # 34 tests: units + full service flow + live HTTP server (needs ffmpeg)
 python samples/make_samples.py   # regenerates the synthetic samples used in TEST_REPORT.md
 ```
 
